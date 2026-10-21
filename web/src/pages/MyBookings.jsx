@@ -59,6 +59,19 @@ function BookingCard({ booking, role, onChanged }) {
         <span className="text-xs font-medium bg-gray-100 px-2 py-1 rounded">{booking.status}</span>
       </div>
 
+      {role === "lender" && booking.status === "REQUESTED" && booking.borrower_name && (
+        <div className="mt-3 rounded bg-blue-50 p-3 text-sm">
+          <p className="font-medium">Borrower contact</p>
+          <p>{booking.borrower_name} · {booking.borrower_phone} · Room {booking.borrower_room_no}</p>
+        </div>
+      )}
+      {role === "borrower" && booking.lender_name && (
+        <div className="mt-3 rounded bg-green-50 p-3 text-sm">
+          <p className="font-medium">Lender pickup contact</p>
+          <p>{booking.lender_name} · {booking.lender_phone} · Room {booking.lender_room_no}</p>
+        </div>
+      )}
+
       {error && <p className="bg-red-50 text-red-600 text-sm p-2 rounded mt-3">{error}</p>}
 
       <div className="mt-3 flex flex-wrap gap-2">
@@ -130,8 +143,9 @@ function BookingCard({ booking, role, onChanged }) {
       )}
 
       {/* Either party: raise a dispute */}
-      {["DROP_SUBMITTED", "COMPLETED"].includes(booking.status) && (
+      {booking.status === "DROP_SUBMITTED" && (
         <div className="mt-3 border-t pt-3">
+          <p className="text-xs text-gray-500 mb-2">Raise a dispute before the lender reviews the return so the rent and deposit stay on hold.</p>
           {!showDispute ? (
             <button onClick={() => setShowDispute(true)} className="text-sm text-amber-700">
               Raise a dispute

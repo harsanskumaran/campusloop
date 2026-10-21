@@ -18,8 +18,9 @@ router.get("/", requireAuth, requireAdmin, async (req, res) => {
 });
 
 const resolveSchema = z.object({
-  resolution: z.enum(["NO_REFUND", "OFFLINE_SETTLED"]),
-  note: z.string().optional(),
+  resolution: z.enum(["CUSTOM_SETTLEMENT", "OFFLINE_SETTLED"]),
+  lenderAmount: z.number().int().min(0),
+  note: z.string().trim().min(1, "A resolution comment is required").max(1000),
 });
 
 // POST /admin/disputes/:id/resolve — admin only
@@ -28,7 +29,13 @@ router.post("/:id/resolve", requireAuth, requireAdmin, async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
   try {
-    const result = await resolveDispute(req.user.id, req.params.id, parsed.data.resolution, parsed.data.note);
+    const result = await resolveDispute(
+      req.user.id,
+      req.params.id,
+      parsed.data.resolution,
+      parsed.data.lenderAmount,
+      parsed.data.note
+    );
     res.json(result);
   } catch (err) {
     if (err instanceof DisputeError) return res.status(err.status).json({ error: err.message });

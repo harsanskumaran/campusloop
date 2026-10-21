@@ -47,16 +47,24 @@ function DisputesTab() {
   const [disputes, setDisputes] = useState([]);
   const [busyId, setBusyId] = useState(null);
   const [notes, setNotes] = useState({});
+  const [lenderAmounts, setLenderAmounts] = useState({});
 
   function load() {
     api.get("/admin/concerns").then((d) => setDisputes(d.disputes));
   }
   useEffect(load, []);
 
-  async function resolve(id, resolution) {
-    setBusyId(id);
+  async function resolve(dispute, resolution) {
+    const lenderAmount = resolution === "OFFLINE_SETTLED"
+      ? dispute.rent_coins
+      : Number(lenderAmounts[dispute.id]);
+    setBusyId(dispute.id);
     try {
-      await api.post(`/admin/disputes/${id}/resolve`, { resolution, note: notes[id] || "" });
+      await api.post(`/admin/disputes/${dispute.id}/resolve`, {
+        resolution,
+        lenderAmount,
+        note: (notes[dispute.id] || "").trim(),
+      });
       load();
     } catch (err) {
       alert(err.message);
@@ -73,27 +81,61 @@ function DisputesTab() {
             <div>
               <p className="font-semibold">{d.item_title}</p>
               <p className="text-sm text-gray-600">{d.reason}</p>
+              <p className="mt-2 text-sm">
+                <span className="font-medium">Borrower:</span> {d.borrower_name} · {d.borrower_phone} · Room {d.borrower_room_no}
+              </p>
+              <p className="text-sm">
+                <span className="font-medium">Lender:</span> {d.lender_name} · {d.lender_phone} · Room {d.lender_room_no}
+              </p>
+              <p className="text-sm mt-1">
+                Held from borrower: ₹{d.held_amount} (₹{d.rent_coins} rent + ₹{d.deposit_coins} deposit)
+              </p>
             </div>
             <span className={`text-xs px-2 py-1 rounded h-fit ${d.status === "OPEN" ? "bg-amber-100 text-amber-800" : "bg-gray-100"}`}>
               {d.status}
             </span>
           </div>
           {d.status === "OPEN" && (
-            <div className="mt-3 flex gap-2">
-              <input
-                placeholder="Resolution note..."
-                value={notes[d.id] || ""}
-                onChange={(e) => setNotes((n) => ({ ...n, [d.id]: e.target.value }))}
-                className="flex-1 border rounded px-2 py-1 text-sm"
-              />
-              <button disabled={busyId === d.id} onClick={() => resolve(d.id, "NO_REFUND")}
-                className="bg-red-600 text-white text-sm px-3 py-1.5 rounded disabled:opacity-50">
-                No refund
-              </button>
-              <button disabled={busyId === d.id} onClick={() => resolve(d.id, "OFFLINE_SETTLED")}
-                className="bg-gray-800 text-white text-sm px-3 py-1.5 rounded disabled:opacity-50">
-                Offline settled
-              </button>
+            <div className="mt-3 space-y-2">
+              <label className="block text-sm font-medium">
+                Amount to transfer from held funds to lender (₹)
+                <input
+                  type="number"
+                  min="0"
+                  max={d.held_amount}
+                  step="1"
+                  required
+                  value={lenderAmounts[d.id] ?? ""}
+                  onChange={(e) => setLenderAmounts((a) => ({ ...a, [d.id]: e.target.value }))}
+                  className="block w-full border rounded px-2 py-1 text-sm mt-1"
+                />
+              </label>
+              <label className="block text-sm font-medium">
+                Admin comment (required)
+                <textarea
+                  required
+                  value={notes[d.id] || ""}
+                  onChange={(e) => setNotes((n) => ({ ...n, [d.id]: e.target.value }))}
+                  className="block w-full border rounded px-2 py-1 text-sm mt-1"
+                  rows={2}
+                />
+              </label>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  disabled={busyId === d.id || !notes[d.id]?.trim() ||
+                    lenderAmounts[d.id] === undefined || String(lenderAmounts[d.id]).trim() === "" ||
+                    Number(lenderAmounts[d.id]) < 0 || Number(lenderAmounts[d.id]) > Number(d.held_amount)}
+                  onClick={() => resolve(d, "CUSTOM_SETTLEMENT")}
+                  className="bg-blue-600 text-white text-sm px-3 py-1.5 rounded disabled:opacity-50">
+                  Apply amount; release remainder to borrower
+                </button>
+                <button
+                  disabled={busyId === d.id || !notes[d.id]?.trim()}
+                  onClick={() => resolve(d, "OFFLINE_SETTLED")}
+                  className="bg-gray-800 text-white text-sm px-3 py-1.5 rounded disabled:opacity-50">
+                  Offline settle (rent to lender, deposit to borrower)
+                </button>
+              </div>
             </div>
           )}
           {d.status === "RESOLVED" && (

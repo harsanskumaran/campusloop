@@ -96,6 +96,17 @@ export async function listItems({ category, search, limit = 30 }) {
   return result.rows;
 }
 
+export async function listMyItems(ownerId) {
+  const result = await pool.query(
+    `SELECT id, title, status, tier, cooling_until, created_at
+     FROM item
+     WHERE owner_id = $1
+     ORDER BY created_at DESC`,
+    [ownerId]
+  );
+  return result.rows;
+}
+
 // Returns the date ranges this item is already booked for, so the portal
 // can grey them out and only allow picking free dates.
 export async function getAvailability(itemId) {

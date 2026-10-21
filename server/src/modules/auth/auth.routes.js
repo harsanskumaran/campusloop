@@ -8,11 +8,15 @@ import { requireAuth } from "../../middleware/auth.js";
 const router = Router();
 
 const registerSchema = z.object({
-  name: z.string().min(2),
-  email: z.string().email(),
+  name: z.string().trim().min(2).regex(/^[\p{L} ]+$/u, "Name can only contain letters"),
+  email: z.string().trim().email().refine(
+    (email) => email.toLowerCase().endsWith("@srm.edu.in"),
+    "Email must use the @srm.edu.in domain"
+  ).transform((email) => email.toLowerCase()),
   password: z.string().min(6),
   campusId: z.string().optional(),
-  phone: z.string().optional(),
+  phone: z.string().regex(/^\d{10}$/, "Contact number must be exactly 10 digits"),
+  roomNo: z.string().trim().min(1, "Room number is required").max(40),
 });
 
 // POST /auth/register
@@ -21,7 +25,7 @@ router.post("/register", async (req, res) => {
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.flatten() });
   }
-  const { name, email, password, campusId, phone } = parsed.data;
+  const { name, email, password, campusId, phone, roomNo } = parsed.data;
 
   try {
     const existing = await pool.query("SELECT id FROM app_user WHERE email = $1", [email]);
@@ -37,10 +41,10 @@ router.post("/register", async (req, res) => {
 
     const user = await withTransaction(async (client) => {
       const userResult = await client.query(
-        `INSERT INTO app_user (name, email, phone, password_hash, campus_id, semester_id)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         RETURNING id, name, email, role, status`,
-        [name, email, phone ?? null, passwordHash, campusId ?? null, semesterId]
+        `INSERT INTO app_user (name, email, phone, room_no, password_hash, campus_id, semester_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING id, name, email, phone, room_no, role, status`,
+        [name, email, phone, roomNo, passwordHash, campusId ?? null, semesterId]
       );
       const newUser = userResult.rows[0];
 
@@ -59,7 +63,7 @@ router.post("/register", async (req, res) => {
 });
 
 const loginSchema = z.object({
-  email: z.string().email(),
+  email: z.string().trim().email().transform((email) => email.toLowerCase()),
   password: z.string().min(1),
 });
 
@@ -73,7 +77,7 @@ router.post("/login", async (req, res) => {
 
   try {
     const result = await pool.query(
-      "SELECT id, name, email, password_hash, role, status FROM app_user WHERE email = $1",
+      "SELECT id, name, email, phone, room_no, password_hash, role, status FROM app_user WHERE email = $1",
       [email]
     );
     const user = result.rows[0];
@@ -99,7 +103,7 @@ router.post("/login", async (req, res) => {
 router.get("/me", requireAuth, async (req, res) => {
   try {
     const result = await pool.query(
-      "SELECT id, name, email, role, status, campus_id, semester_id, created_at FROM app_user WHERE id = $1",
+      "SELECT id, name, email, phone, room_no, role, status, campus_id, semester_id, created_at FROM app_user WHERE id = $1",
       [req.user.id]
     );
     if (result.rows.length === 0) {

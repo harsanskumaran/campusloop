@@ -191,7 +191,7 @@ export async function raiseDispute(userId, bookingId, reason) {
     const isParty = booking.borrower_id === userId || booking.lender_id === userId;
     if (!isParty) throw new HandoverError("Not a party to this booking", 403);
 
-    if (!["DROP_SUBMITTED", "COMPLETED"].includes(booking.status)) {
+    if (booking.status !== "DROP_SUBMITTED") {
       throw new HandoverError(`Cannot raise a dispute while booking is ${booking.status}`);
     }
 

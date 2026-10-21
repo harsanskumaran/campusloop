@@ -259,11 +259,26 @@ export async function cancelBooking(borrowerId, bookingId) {
 export async function listMyBookings(userId, role) {
   const column = role === "lender" ? "lender_id" : "borrower_id";
   const result = await pool.query(
-    `SELECT b.*, i.title AS item_title
-     FROM booking b JOIN item i ON i.id = b.item_id
+    `SELECT b.*, i.title AS item_title,
+            CASE WHEN $2::text = 'lender' OR b.status IN
+              ('CONFIRMED','PICKUP_READY','PICKED_UP','OVERDUE','DROP_SUBMITTED','ON_HOLD','COMPLETED')
+              THEN lender.name END AS lender_name,
+            CASE WHEN $2::text = 'lender' OR b.status IN
+              ('CONFIRMED','PICKUP_READY','PICKED_UP','OVERDUE','DROP_SUBMITTED','ON_HOLD','COMPLETED')
+              THEN lender.phone END AS lender_phone,
+            CASE WHEN $2::text = 'lender' OR b.status IN
+              ('CONFIRMED','PICKUP_READY','PICKED_UP','OVERDUE','DROP_SUBMITTED','ON_HOLD','COMPLETED')
+              THEN lender.room_no END AS lender_room_no,
+            CASE WHEN $2::text = 'lender' THEN borrower.name END AS borrower_name,
+            CASE WHEN $2::text = 'lender' THEN borrower.phone END AS borrower_phone,
+            CASE WHEN $2::text = 'lender' THEN borrower.room_no END AS borrower_room_no
+     FROM booking b
+     JOIN item i ON i.id = b.item_id
+     JOIN app_user lender ON lender.id = b.lender_id
+     JOIN app_user borrower ON borrower.id = b.borrower_id
      WHERE b.${column} = $1
      ORDER BY b.created_at DESC`,
-    [userId]
+    [userId, role]
   );
   return result.rows;
 }

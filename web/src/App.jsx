@@ -8,6 +8,7 @@ import ItemDetail from "./pages/ItemDetail.jsx";
 import MyBookings from "./pages/MyBookings.jsx";
 import Wallet from "./pages/Wallet.jsx";
 import PostItem from "./pages/PostItem.jsx";
+import MyItems from "./pages/MyItems.jsx";
 import Admin from "./pages/Admin.jsx";
 
 function ProtectedRoute({ children }) {
@@ -34,6 +35,7 @@ function Nav() {
       <div className="flex items-center gap-4 text-sm">
         <Link to="/items">Browse</Link>
         <Link to="/post-item">List an item</Link>
+        <Link to="/my-items">My items</Link>
         <Link to="/bookings">My Bookings</Link>
         <Link to="/wallet">Wallet</Link>
         {user.role === "ADMIN" && <Link to="/admin" className="text-purple-600 font-medium">Admin</Link>}
@@ -57,6 +59,7 @@ export default function App() {
           <Route path="/bookings" element={<ProtectedRoute><MyBookings /></ProtectedRoute>} />
           <Route path="/wallet" element={<ProtectedRoute><Wallet /></ProtectedRoute>} />
           <Route path="/post-item" element={<ProtectedRoute><PostItem /></ProtectedRoute>} />
+          <Route path="/my-items" element={<ProtectedRoute><MyItems /></ProtectedRoute>} />
           <Route path="/admin" element={<AdminRoute><Admin /></AdminRoute>} />
           <Route path="*" element={<Navigate to="/items" replace />} />
         </Routes>

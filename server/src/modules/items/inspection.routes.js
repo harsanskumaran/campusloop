@@ -3,9 +3,23 @@ import { Router } from "express";
 import { z } from "zod";
 import { requireAuth } from "../../middleware/auth.js";
 import { upload } from "../../middleware/upload.js";
-import { submitInspection, extendRepair, InspectionError } from "./inspection.service.js";
+import {
+  submitInspection, extendRepair, releaseCoolingPeriod, InspectionError,
+} from "./inspection.service.js";
 
 const router = Router();
+
+// POST /items/:id/cooling/release — lender ends the cooling period early
+router.post("/:id/cooling/release", requireAuth, async (req, res) => {
+  try {
+    const result = await releaseCoolingPeriod(req.user.id, req.params.id);
+    res.json(result);
+  } catch (err) {
+    if (err instanceof InspectionError) return res.status(err.status).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: "Failed to release the cooling period" });
+  }
+});
 
 // POST /items/:id/inspection — multipart form, field "photos", plus fields "passed" ("true"/"false") and "notes"
 router.post("/:id/inspection", requireAuth, upload.array("photos", 8), async (req, res) => {

@@ -7,7 +7,7 @@ import { quotaGuard } from "../../middleware/quotaGuard.js";
 import { upload } from "../../middleware/upload.js";
 import { savePhoto } from "../../utils/savePhoto.js";
 import {
-  createItem, getItem, listItems, getAvailability, ItemError,
+  createItem, getItem, listItems, getAvailability, listMyItems, ItemError,
 } from "./items.service.js";
 
 const router = Router();
@@ -48,6 +48,17 @@ router.get("/", requireAuth, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to list items" });
+  }
+});
+
+// GET /items/mine — items owned by the current lender
+router.get("/mine", requireAuth, async (req, res) => {
+  try {
+    const items = await listMyItems(req.user.id);
+    res.json({ items });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch your items" });
   }
 });
 

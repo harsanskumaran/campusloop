@@ -35,10 +35,18 @@ export async function listSuspendedUsers() {
 
 export async function listAllDisputes() {
   const result = await pool.query(
-    `SELECT d.*, b.item_id, b.borrower_id, b.lender_id, i.title AS item_title
+    `SELECT d.*, b.item_id, b.borrower_id, b.lender_id, b.rent_coins, b.deposit_coins,
+            b.status AS booking_status, i.title AS item_title,
+            borrower.name AS borrower_name, borrower.phone AS borrower_phone,
+            borrower.room_no AS borrower_room_no,
+            lender.name AS lender_name, lender.phone AS lender_phone,
+            lender.room_no AS lender_room_no,
+            CASE WHEN b.status = 'ON_HOLD' THEN b.rent_coins + b.deposit_coins ELSE 0 END AS held_amount
      FROM dispute d
      JOIN booking b ON b.id = d.booking_id
      JOIN item i ON i.id = b.item_id
+     JOIN app_user borrower ON borrower.id = b.borrower_id
+     JOIN app_user lender ON lender.id = b.lender_id
      ORDER BY d.created_at DESC`
   );
   return result.rows;

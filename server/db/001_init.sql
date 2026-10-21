@@ -39,6 +39,7 @@ CREATE TABLE app_user (
   name           TEXT NOT NULL,
   email          TEXT NOT NULL UNIQUE,
   phone          TEXT,
+  room_no        TEXT,
   password_hash  TEXT NOT NULL,
   role           user_role   NOT NULL DEFAULT 'USER',
   status         user_status NOT NULL DEFAULT 'ACTIVE',

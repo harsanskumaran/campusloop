@@ -12,18 +12,23 @@ export class DisputeError extends Error {
 export async function listOpenDisputes() {
   const result = await pool.query(
     `SELECT d.*, b.item_id, b.borrower_id, b.lender_id, b.rent_coins, b.deposit_coins,
-            b.deposit_outcome, i.title AS item_title
+            b.deposit_outcome, b.status AS booking_status, i.title AS item_title,
+            borrower.name AS borrower_name, borrower.phone AS borrower_phone,
+            lender.name AS lender_name, lender.phone AS lender_phone,
+            CASE WHEN b.status = 'ON_HOLD' THEN b.rent_coins + b.deposit_coins ELSE 0 END AS held_amount
      FROM dispute d
      JOIN booking b ON b.id = d.booking_id
      JOIN item i ON i.id = b.item_id
+     JOIN app_user borrower ON borrower.id = b.borrower_id
+     JOIN app_user lender ON lender.id = b.lender_id
      WHERE d.status = 'OPEN'
      ORDER BY d.created_at`
   );
   return result.rows;
 }
 
-// Admin resolves a dispute. resolution is 'NO_REFUND' or 'OFFLINE_SETTLED'.
-export async function resolveDispute(adminId, disputeId, resolution, note) {
+// The custom amount is awarded to the lender; any remaining held amount is returned.
+export async function resolveDispute(adminId, disputeId, resolution, lenderAmount, note) {
   return withTransaction(async (client) => {
     const disputeResult = await client.query(
       "SELECT * FROM dispute WHERE id = $1 FOR UPDATE",
@@ -40,57 +45,63 @@ export async function resolveDispute(adminId, disputeId, resolution, note) {
     const booking = bookingResult.rows[0];
     if (!booking) throw new DisputeError("Booking not found", 404);
 
-    const alreadySettled = booking.deposit_outcome === "REFUNDED" || booking.deposit_outcome === "FORFEITED";
-
-    if (!alreadySettled) {
-      // Nothing moved yet (dispute raised before lender review). Settle now.
-      await creditCash(
-        booking.lender_id, booking.rent_coins, "RENT_PAYMENT", booking.id,
-        "Rent released on dispute resolution", client
-      );
-
-      if (resolution === "NO_REFUND") {
-        await deductHeldCash(
-          booking.borrower_id, booking.deposit_coins, booking.id,
-          note ?? "Deposit forfeited: admin ruling", client
-        );
-        await creditCash(
-          booking.lender_id, booking.deposit_coins, "DAMAGE_DEDUCTION", booking.id,
-          "Deposit credited to lender: admin ruling", client
-        );
-      } else {
-        await releaseCash(booking.borrower_id, booking.deposit_coins, booking.id, client);
-      }
-    } else {
-      // Already settled before the dispute — reverse only if the admin's
-      // decision contradicts what already happened.
-      const wasForfeited = booking.deposit_outcome === "FORFEITED";
-      const shouldBeForfeited = resolution === "NO_REFUND";
-
-      if (wasForfeited && !shouldBeForfeited) {
-        // Reverse: move the deposit back from lender to borrower
-        await creditCash(
-          booking.borrower_id, booking.deposit_coins, "ADJUSTMENT", booking.id,
-          note ?? "Deposit returned to borrower: admin overturned prior forfeiture", client
-        );
-      } else if (!wasForfeited && shouldBeForfeited) {
-        // Reverse: claw back the deposit from borrower, give to lender
-        await creditCash(
-          booking.lender_id, booking.deposit_coins, "ADJUSTMENT", booking.id,
-          note ?? "Deposit reassigned to lender: admin ruling", client
-        );
-      }
-      // If the resolution matches what already happened, no money moves —
-      // admin is just confirming and releasing the hold.
+    if (booking.status !== "ON_HOLD" || booking.deposit_outcome !== "ON_HOLD") {
+      throw new DisputeError("Booking funds are not on hold");
     }
 
-    const finalDepositOutcome = resolution === "NO_REFUND" ? "FORFEITED" : "REFUNDED";
+    const totalHeld = booking.rent_coins + booking.deposit_coins;
+    if (resolution === "CUSTOM_SETTLEMENT" && lenderAmount > totalHeld) {
+      throw new DisputeError(`Lender amount cannot exceed the ₹${totalHeld} held amount`);
+    }
+
+    if (resolution === "OFFLINE_SETTLED") {
+      await deductHeldCash(
+        booking.borrower_id, booking.rent_coins, booking.id,
+        "Offline dispute settlement: rent paid to lender", client, "RENT_PAYMENT"
+      );
+      await creditCash(
+        booking.lender_id, booking.rent_coins, "RENT_PAYMENT", booking.id,
+        "Rent released by offline dispute settlement", client
+      );
+      await releaseCash(booking.borrower_id, booking.deposit_coins, booking.id, client);
+    } else {
+      const rentAward = Math.min(lenderAmount, booking.rent_coins);
+      const depositAward = lenderAmount - rentAward;
+
+      if (rentAward > 0) {
+        await deductHeldCash(
+          booking.borrower_id, rentAward, booking.id,
+          "Dispute settlement: rent awarded to lender", client, "RENT_PAYMENT"
+        );
+        await creditCash(
+          booking.lender_id, rentAward, "RENT_PAYMENT", booking.id,
+          "Rent awarded by admin dispute settlement", client
+        );
+      }
+      if (depositAward > 0) {
+        await deductHeldCash(
+          booking.borrower_id, depositAward, booking.id,
+          "Dispute settlement: deposit awarded to lender", client
+        );
+        await creditCash(
+          booking.lender_id, depositAward, "DAMAGE_DEDUCTION", booking.id,
+          "Deposit awarded by admin dispute settlement", client
+        );
+      }
+
+      const borrowerAmount = totalHeld - lenderAmount;
+      if (borrowerAmount > 0) {
+        await releaseCash(booking.borrower_id, borrowerAmount, booking.id, client);
+      }
+    }
+
+    const finalDepositOutcome = resolution === "OFFLINE_SETTLED" ? "REFUNDED" : "SETTLED";
 
     await client.query(
       `UPDATE dispute SET status = 'RESOLVED', resolution = $1, resolved_by = $2,
                            resolved_at = now(), resolution_note = $3
        WHERE id = $4`,
-      [resolution, adminId, note ?? null, disputeId]
+      [resolution, adminId, note, disputeId]
     );
     await client.query(
       "UPDATE booking SET status = 'COMPLETED', deposit_outcome = $1 WHERE id = $2",
@@ -107,6 +118,13 @@ export async function resolveDispute(adminId, disputeId, resolution, note) {
       await client.query("UPDATE item SET status = 'LISTED' WHERE id = $1", [booking.item_id]);
     }
 
-    return { disputeId, resolution, bookingStatus: "COMPLETED", depositOutcome: finalDepositOutcome };
+    return {
+      disputeId,
+      resolution,
+      lenderAmount: resolution === "OFFLINE_SETTLED" ? booking.rent_coins : lenderAmount,
+      borrowerAmount: resolution === "OFFLINE_SETTLED" ? booking.deposit_coins : totalHeld - lenderAmount,
+      bookingStatus: "COMPLETED",
+      depositOutcome: finalDepositOutcome,
+    };
   });
 }

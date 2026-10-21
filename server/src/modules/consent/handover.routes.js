@@ -87,7 +87,7 @@ router.post("/:id/review", requireAuth, async (req, res) => {
   }
 });
 
-const disputeSchema = z.object({ reason: z.string().min(5) });
+const disputeSchema = z.object({ reason: z.string().trim().min(5) });
 
 // POST /bookings/:id/dispute — either party escalates to admin
 router.post("/:id/dispute", requireAuth, async (req, res) => {

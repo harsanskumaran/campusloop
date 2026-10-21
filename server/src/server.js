@@ -13,10 +13,10 @@ import quotaRoutes from "./modules/quota/quota.routes.js";
 import bookingRoutes from "./modules/bookings/bookings.routes.js";
 import handoverRoutes from "./modules/consent/handover.routes.js";
 import inspectionRoutes from "./modules/items/inspection.routes.js";
-import blocklistRoutes from "./modules/blocklist/blocklist.routes.js";
 import disputeRoutes from "./modules/disputes/dispute.routes.js";
-import adminRoutes from "./modules/admin/admin.routes.js";
 import { startJobs } from "./jobs/index.js";
+import blocklistRoutes from "./modules/blocklist/blocklist.routes.js";
+import adminRoutes from "./modules/admin/admin.routes.js";
 
 dotenv.config();
 
@@ -37,23 +37,18 @@ app.get("/health", async (req, res) => {
   }
 });
 
-// ===== Route modules =====
-app.use("/auth", authRoutes);
-app.use("/wallet", walletRoutes);
-app.use("/items", itemRoutes);
-app.use("/items", inspectionRoutes);      // POST /items/:id/inspection, /items/:id/repair/extend
-app.use("/photos", photoRoutes);
-app.use("/quota", quotaRoutes);
-app.use("/bookings", bookingRoutes);      // request, accept, reject, cancel, mine, extensions
-app.use("/bookings", handoverRoutes);     // pickup, drop, evidence, review, dispute
-app.use("/blocklist", blocklistRoutes);
-app.use("/admin/disputes", disputeRoutes); // must come before /admin
-app.use("/admin", adminRoutes);
-
-// Unknown route -> clear JSON 404 (easier to debug than Express's HTML page)
-app.use((req, res) => {
-  res.status(404).json({ error: `Route not found: ${req.method} ${req.originalUrl}` });
-});
+// TODO: mount route modules here as they're built
+ app.use("/auth", authRoutes);
+ app.use("/wallet", walletRoutes);
+ app.use("/items", itemRoutes);
+ app.use("/photos", photoRoutes);
+ app.use("/quota", quotaRoutes);
+ app.use("/bookings", bookingRoutes);
+ app.use("/bookings", handoverRoutes);
+ app.use("/items", inspectionRoutes);
+ app.use("/admin/disputes", disputeRoutes);
+ app.use("/blocklist", blocklistRoutes);
+ app.use("/admin", adminRoutes);
 
 // Basic error handler (last middleware)
 app.use((err, req, res, next) => {
@@ -64,5 +59,5 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
   console.log(`CampusLoop server running on http://localhost:${PORT}`);
-  startJobs(); // background jobs: expire requests, mark overdue, escalate lost items, end semester
+  startJobs();
 });

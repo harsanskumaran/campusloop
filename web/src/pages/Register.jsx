@@ -9,6 +9,8 @@ export default function Register() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [phone, setPhone] = useState("");
+  const [roomNo, setRoomNo] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -17,7 +19,7 @@ export default function Register() {
     setError("");
     setLoading(true);
     try {
-      await register(name, email, password);
+      await register(name, email, password, phone, roomNo);
       navigate("/items");
     } catch (err) {
       setError(err.message);
@@ -33,18 +35,32 @@ export default function Register() {
         {error && <p className="bg-red-50 text-red-600 text-sm p-2 rounded mb-4">{error}</p>}
         <label className="block text-sm font-medium mb-1">Name</label>
         <input
-          required value={name} onChange={(e) => setName(e.target.value)}
+          required minLength={2} pattern="[\p{L} ]+" title="Use letters only"
+          value={name} onChange={(e) => setName(e.target.value)}
           className="w-full border rounded px-3 py-2 mb-4"
         />
         <label className="block text-sm font-medium mb-1">Campus Email</label>
         <input
-          type="email" required value={email} onChange={(e) => setEmail(e.target.value)}
+          type="email" required pattern=".+@srm\.edu\.in$" title="Use your @srm.edu.in email"
+          value={email} onChange={(e) => setEmail(e.target.value)}
+          className="w-full border rounded px-3 py-2 mb-4"
+        />
+        <label className="block text-sm font-medium mb-1">Contact number</label>
+        <input
+          type="tel" required inputMode="numeric" pattern="[0-9]{10}" maxLength={10}
+          title="Enter exactly 10 digits" value={phone}
+          onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
+          className="w-full border rounded px-3 py-2 mb-4"
+        />
+        <label className="block text-sm font-medium mb-1">Room number</label>
+        <input
+          required value={roomNo} onChange={(e) => setRoomNo(e.target.value)}
           className="w-full border rounded px-3 py-2 mb-4"
         />
         <label className="block text-sm font-medium mb-1">Password</label>
         <input
           type="password" required minLength={6} value={password} onChange={(e) => setPassword(e.target.value)}
-          className="w-full border rounded px-3 py-2 mb-6"
+          className="w-full border rounded px-3 py-2 mb-4"
         />
         <button
           type="submit" disabled={loading}

@@ -11,6 +11,30 @@ export class InspectionError extends Error {
 
 const MAX_REPAIR_EXTENSION_DAYS = 2;
 
+export async function releaseCoolingPeriod(lenderId, itemId) {
+  return withTransaction(async (client) => {
+    const itemResult = await client.query("SELECT * FROM item WHERE id = $1 FOR UPDATE", [itemId]);
+    const item = itemResult.rows[0];
+    if (!item) throw new InspectionError("Item not found", 404);
+    if (item.owner_id !== lenderId) throw new InspectionError("Only the owner can release the cooling period", 403);
+    if (item.status !== "COOLING") {
+      throw new InspectionError(`Item is not in its cooling period (currently ${item.status})`);
+    }
+
+    await client.query(
+      `INSERT INTO inspection (item_id, passed, notes)
+       VALUES ($1, TRUE, 'Cooling period released early by lender')`,
+      [itemId]
+    );
+    await client.query(
+      "UPDATE item SET status = 'LISTED', cooling_until = NULL WHERE id = $1",
+      [itemId]
+    );
+
+    return { itemId: item.id, status: "LISTED" };
+  });
+}
+
 // Lender submits an inspection during COOLING (or while UNDER_REPAIR, to
 // confirm a fix). Passing relists the item immediately; failing sends it to
 // UNDER_REPAIR.
