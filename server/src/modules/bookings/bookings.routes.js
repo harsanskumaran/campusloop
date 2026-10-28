@@ -10,8 +10,8 @@ import { QuotaError } from "../quota/quota.service.js";
 import { ConsentError } from "../consent/consent.service.js";
 import { ItemError } from "../items/items.service.js";
 import {
-  requestExtension, respondToExtension, listExtensionsForLender, ExtensionError,
-} from "./extensions.service.js";
+  requestBookingExtension, respondToBookingExtension, BookingExtensionError,
+} from "./bookingExtensions.service.js";
 
 const router = Router();
 
@@ -92,57 +92,51 @@ router.get("/mine", requireAuth, async (req, res) => {
   }
 });
 
-// ===== Extension requests =====
-
-const extRequestSchema = z.object({ itemId: z.number().int(), note: z.string().optional() });
-
-// POST /bookings/extensions — borrower requests an extra monthly slot
-router.post("/extensions", requireAuth, async (req, res) => {
-  const parsed = extRequestSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+// POST /bookings/:id/booking-extension — borrower requests a later return date
+const bookingExtensionSchema = z.object({
+  requestedEndDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+});
+router.post("/:id/booking-extension", requireAuth, async (req, res) => {
+  const parsed = bookingExtensionSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.flatten() });
+  }
 
   try {
-    const result = await requestExtension(req.user.id, parsed.data.itemId, parsed.data.note);
-    res.status(201).json({ extension: result });
+    const extension = await requestBookingExtension(
+      req.user.id,
+      req.params.id,
+      parsed.data.requestedEndDate
+    );
+    res.status(201).json({ extension });
   } catch (err) {
-    if (err instanceof ExtensionError) return res.status(err.status).json({ error: err.message });
+    if (err instanceof BookingExtensionError || err instanceof WalletError) {
+      return res.status(err.status).json({ error: err.message });
+    }
     console.error(err);
-    res.status(500).json({ error: "Failed to request extension" });
+    res.status(500).json({ error: "Failed to request booking extension" });
   }
 });
 
-// GET /bookings/extensions/mine — lender views requests on their items
-router.get("/extensions/mine", requireAuth, async (req, res) => {
-  try {
-    const extensions = await listExtensionsForLender(req.user.id);
-    res.json({ extensions });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Failed to fetch extensions" });
+// Lender approves/rejects additional time on an existing booking
+router.post("/booking-extensions/:id/:decision", requireAuth, async (req, res) => {
+  if (!["approve", "reject"].includes(req.params.decision)) {
+    return res.status(400).json({ error: "Decision must be approve or reject" });
   }
-});
 
-// POST /bookings/extensions/:id/approve
-router.post("/extensions/:id/approve", requireAuth, async (req, res) => {
   try {
-    const result = await respondToExtension(req.user.id, req.params.id, true);
-    res.json({ extension: result });
+    const extension = await respondToBookingExtension(
+      req.user.id,
+      req.params.id,
+      req.params.decision === "approve"
+    );
+    res.json({ extension });
   } catch (err) {
-    if (err instanceof ExtensionError) return res.status(err.status).json({ error: err.message });
+    if (err instanceof BookingExtensionError || err instanceof WalletError) {
+      return res.status(err.status).json({ error: err.message });
+    }
     console.error(err);
-    res.status(500).json({ error: "Failed to reject extension" });
-  }
-});
-
-// POST /bookings/extensions/:id/reject
-router.post("/extensions/:id/reject", requireAuth, async (req, res) => {
-  try {
-    const result = await respondToExtension(req.user.id, req.params.id, false);
-    res.json({ extension: result });
-  } catch (err) {
-    if (err instanceof ExtensionError) return res.status(err.status).json({ error: err.message });
-    console.error(err);
-    res.status(500).json({ error: "Failed to reject extension" });
+    res.status(500).json({ error: "Failed to respond to booking extension" });
   }
 });
 

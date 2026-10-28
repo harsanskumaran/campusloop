@@ -30,12 +30,32 @@ async function request(method, path, { json, formData } = {}) {
   const data = await res.json().catch(() => ({}));
 
   if (!res.ok) {
-    const message = data.error
-      ? (typeof data.error === "string" ? data.error : JSON.stringify(data.error))
-      : `Request failed (${res.status})`;
-    throw new Error(message);
+    throw new Error(readableError(data.error) || `Request failed (${res.status})`);
   }
   return data;
+}
+
+// The server sends either a plain message or a zod validation object
+// ({ formErrors: [], fieldErrors: { field: ["message"] } }). Show people text, not JSON.
+function readableError(error) {
+  if (!error) return "";
+  if (typeof error === "string") return error;
+  if (error.fieldErrors || error.formErrors) {
+    const messages = [...(error.formErrors || []), ...Object.values(error.fieldErrors || {}).flat()];
+    if (messages.length) return messages.join(". ");
+  }
+  return JSON.stringify(error);
+}
+
+// Download a protected file (e.g. /photos/12) as a Blob. <img src> can't send the
+// login token, so images are fetched here and shown through an object URL.
+export async function fetchBlob(path) {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new Error(`Could not load file (${res.status})`);
+  return res.blob();
 }
 
 export const api = {

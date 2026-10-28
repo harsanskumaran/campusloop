@@ -1,33 +1,56 @@
 // src/components/PhotoPicker.jsx
-import { useState } from "react";
+import { useEffect, useMemo } from "react";
 
-// capture="environment" prompts the phone's back camera when available.
-export default function PhotoPicker({ onChange, minCount = 4 }) {
-  const [files, setFiles] = useState([]);
+// Controlled picker: the parent owns `files`. People can add photos in several
+// rounds and remove any of them. Shows how many more are still needed.
+export default function PhotoPicker({ files, onChange, minCount = 4, maxCount = 8 }) {
+  const previews = useMemo(() => files.map((f) => URL.createObjectURL(f)), [files]);
+  useEffect(() => () => previews.forEach((u) => URL.revokeObjectURL(u)), [previews]);
 
-  function handleFiles(e) {
-    const list = Array.from(e.target.files);
-    setFiles(list);
-    onChange(list);
+  function addFiles(e) {
+    const incoming = Array.from(e.target.files || []);
+    e.target.value = ""; // allow choosing the same file again later
+    const known = new Set(files.map((f) => `${f.name}|${f.size}|${f.lastModified}`));
+    const fresh = incoming.filter((f) => !known.has(`${f.name}|${f.size}|${f.lastModified}`));
+    onChange([...files, ...fresh].slice(0, maxCount));
   }
+
+  const remove = (index) => onChange(files.filter((_, i) => i !== index));
+  const missing = Math.max(0, minCount - files.length);
 
   return (
     <div>
       <input
-        type="file" accept="image/*" capture="environment" multiple
-        onChange={handleFiles}
-        className="block w-full text-sm border rounded px-3 py-2"
+        type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={addFiles}
+        disabled={files.length >= maxCount}
+        className="block w-full text-sm border rounded px-3 py-2 disabled:opacity-50"
       />
-      <p className="text-xs text-gray-500 mt-1">
-        {files.length} photo{files.length === 1 ? "" : "s"} selected
-        {files.length < minCount && ` (minimum ${minCount} required)`}
+      <p className={`text-xs mt-1 ${missing > 0 ? "text-amber-700" : "text-green-700"}`}>
+        {files.length} of {maxCount} photos selected
+        {missing > 0 ? ` — add ${missing} more (minimum ${minCount} required)` : " ✓"}
       </p>
       {files.length > 0 && (
-        <div className="flex gap-2 mt-2 flex-wrap">
-          {files.map((f, i) => (
-            <img key={i} src={URL.createObjectURL(f)} alt="" className="w-16 h-16 object-cover rounded border" />
+        <div className="grid grid-cols-4 gap-2 mt-2">
+          {previews.map((url, i) => (
+            <div key={url} className="relative">
+              <img src={url} alt={`Selected photo ${i + 1}`} className="w-full h-20 object-cover rounded border" />
+              <button
+                type="button" onClick={() => remove(i)} aria-label={`Remove photo ${i + 1}`}
+                className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full w-5 h-5 text-xs leading-none"
+              >
+                &times;
+              </button>
+              {i === 0 && (
+                <span className="absolute bottom-1 left-1 bg-black/60 text-white text-[10px] px-1 rounded">
+                  Cover
+                </span>
+              )}
+            </div>
           ))}
         </div>
+      )}
+      {files.length > 1 && (
+        <p className="text-xs text-gray-500 mt-1">The first photo is shown on the browse page.</p>
       )}
     </div>
   );

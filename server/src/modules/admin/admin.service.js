@@ -33,6 +33,16 @@ export async function listSuspendedUsers() {
   return result.rows;
 }
 
+export async function listUsers() {
+  const result = await pool.query(
+    `SELECT id, name, email, phone, room_no, status, created_at
+     FROM app_user
+     WHERE role = 'USER'
+     ORDER BY name`
+  );
+  return result.rows;
+}
+
 export async function listAllDisputes() {
   const result = await pool.query(
     `SELECT d.*, b.item_id, b.borrower_id, b.lender_id, b.rent_coins, b.deposit_coins,
@@ -41,7 +51,10 @@ export async function listAllDisputes() {
             borrower.room_no AS borrower_room_no,
             lender.name AS lender_name, lender.phone AS lender_phone,
             lender.room_no AS lender_room_no,
-            CASE WHEN b.status = 'ON_HOLD' THEN b.rent_coins + b.deposit_coins ELSE 0 END AS held_amount
+            CASE WHEN b.status IN ('ON_HOLD', 'LOST_ESCALATION') THEN b.rent_coins + b.deposit_coins ELSE 0 END AS held_amount,
+            CASE WHEN d.raised_by_id = b.lender_id THEN 'LENDER'
+                 WHEN d.raised_by_id = b.borrower_id THEN 'BORROWER'
+                 ELSE 'SYSTEM' END AS raised_by_role
      FROM dispute d
      JOIN booking b ON b.id = d.booking_id
      JOIN item i ON i.id = b.item_id
@@ -54,17 +67,28 @@ export async function listAllDisputes() {
 
 export async function suspendUser(userId, reason) {
   const result = await pool.query(
-    "UPDATE app_user SET status = 'SUSPENDED' WHERE id = $1 RETURNING id, status",
+    "UPDATE app_user SET status = 'SUSPENDED' WHERE id = $1 AND role = 'USER' RETURNING id, status",
     [userId]
   );
-  if (result.rows.length === 0) throw new Error("User not found");
+  if (result.rows.length === 0) throw new Error("User not found or cannot be blocked");
   console.log(`Admin suspended user ${userId}. Reason: ${reason}`);
   return result.rows[0];
 }
 
 export async function unsuspendUser(userId) {
   const result = await pool.query(
-    "UPDATE app_user SET status = 'ACTIVE' WHERE id = $1 AND status = 'SUSPENDED' RETURNING id, status",
+    `UPDATE app_user u
+     SET status = CASE
+       WHEN (
+         SELECT COUNT(*) FROM quota_usage q
+         WHERE q.user_id = u.id
+           AND q.semester_id = u.semester_id
+           AND q.restored = FALSE
+       ) >= 10 THEN 'EXCEEDED'::user_status
+       ELSE 'ACTIVE'::user_status
+     END
+     WHERE u.id = $1 AND u.status = 'SUSPENDED' AND u.role = 'USER'
+     RETURNING u.id, u.status`,
     [userId]
   );
   if (result.rows.length === 0) throw new Error("User is not currently suspended");

@@ -2,7 +2,6 @@
 import { Router } from "express";
 import { z } from "zod";
 import { requireAuth } from "../../middleware/auth.js";
-import { upload } from "../../middleware/upload.js";
 import { signConsent, ConsentError } from "../consent/consent.service.js";
 import { WalletError } from "../wallet/wallet.service.js";
 import {
@@ -37,20 +36,35 @@ router.post("/:id/consent/booking", requireAuth, async (req, res) => {
   }
 });
 
-// POST /bookings/:id/pickup — borrower accepts condition + uploads photos (multipart, field "photos")
-router.post("/:id/pickup", requireAuth, upload.array("photos", 8), async (req, res) => {
+const textOf = (error) => error.issues.map((i) => i.message).join(". ");
+
+const pickupSchema = z.object({
+  comment: z.string({ error: "Please add a comment about the item's condition at pickup" })
+    .trim().min(3, "Please add a comment about the item's condition at pickup").max(1000),
+});
+
+// POST /bookings/:id/pickup — borrower confirms the item's condition with a written comment (required)
+router.post("/:id/pickup", requireAuth, async (req, res) => {
+  const parsed = pickupSchema.safeParse(req.body ?? {});
+  if (!parsed.success) return res.status(400).json({ error: textOf(parsed.error) });
+
   try {
-    const result = await submitPickup(req.user.id, req.params.id, req.files);
+    const result = await submitPickup(req.user.id, req.params.id, parsed.data.comment);
     res.json(result);
   } catch (err) {
     sendError(res, err, "Failed to submit pickup");
   }
 });
 
-// POST /bookings/:id/drop — borrower uploads drop-point photos (multipart, field "photos")
-router.post("/:id/drop", requireAuth, upload.array("photos", 8), async (req, res) => {
+const dropSchema = z.object({ note: z.string().trim().max(1000).optional() });
+
+// POST /bookings/:id/drop — borrower marks the item as returned (optional note)
+router.post("/:id/drop", requireAuth, async (req, res) => {
+  const parsed = dropSchema.safeParse(req.body ?? {});
+  if (!parsed.success) return res.status(400).json({ error: textOf(parsed.error) });
+
   try {
-    const result = await submitDrop(req.user.id, req.params.id, req.files);
+    const result = await submitDrop(req.user.id, req.params.id, parsed.data.note);
     res.json(result);
   } catch (err) {
     sendError(res, err, "Failed to submit drop");
@@ -71,13 +85,14 @@ router.get("/:id/evidence", requireAuth, async (req, res) => {
 
 const reviewSchema = z.object({
   hasDefect: z.boolean(),
-  note: z.string().optional(),
+  note: z.string({ error: "A comment is required to accept the return or report a defect" })
+    .trim().min(3, "A comment is required to accept the return or report a defect").max(1000),
 });
 
-// POST /bookings/:id/review — lender accepts (no defect) or flags a defect
+// POST /bookings/:id/review — lender accepts (no defect) or flags a defect; a comment is required either way
 router.post("/:id/review", requireAuth, async (req, res) => {
-  const parsed = reviewSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const parsed = reviewSchema.safeParse(req.body ?? {});
+  if (!parsed.success) return res.status(400).json({ error: textOf(parsed.error) });
 
   try {
     const result = await reviewDrop(req.user.id, req.params.id, parsed.data.hasDefect, parsed.data.note);

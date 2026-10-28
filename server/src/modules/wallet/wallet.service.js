@@ -78,7 +78,7 @@ export async function holdCash(userId, amount, bookingId, client) {
 }
 
 // Release held cash back to spendable balance (e.g. booking cancelled before pickup)
-export async function releaseCash(userId, amount, bookingId, client) {
+export async function releaseCash(userId, amount, bookingId, client, note = "Held cash released") {
   const walletResult = await client.query(
     "SELECT id FROM wallet WHERE user_id = $1 FOR UPDATE",
     [userId]
@@ -92,8 +92,8 @@ export async function releaseCash(userId, amount, bookingId, client) {
   );
   await client.query(
     `INSERT INTO cash_ledger (wallet_id, type, amount, booking_id, note)
-     VALUES ($1, 'RELEASE', $2, $3, 'Held cash released')`,
-    [wallet.id, amount, bookingId]
+     VALUES ($1, 'RELEASE', $2, $3, $4)`,
+    [wallet.id, amount, bookingId, note]
   );
 }
 

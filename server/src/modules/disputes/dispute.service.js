@@ -15,7 +15,7 @@ export async function listOpenDisputes() {
             b.deposit_outcome, b.status AS booking_status, i.title AS item_title,
             borrower.name AS borrower_name, borrower.phone AS borrower_phone,
             lender.name AS lender_name, lender.phone AS lender_phone,
-            CASE WHEN b.status = 'ON_HOLD' THEN b.rent_coins + b.deposit_coins ELSE 0 END AS held_amount
+            CASE WHEN b.status IN ('ON_HOLD', 'LOST_ESCALATION') THEN b.rent_coins + b.deposit_coins ELSE 0 END AS held_amount
      FROM dispute d
      JOIN booking b ON b.id = d.booking_id
      JOIN item i ON i.id = b.item_id
@@ -45,7 +45,8 @@ export async function resolveDispute(adminId, disputeId, resolution, lenderAmoun
     const booking = bookingResult.rows[0];
     if (!booking) throw new DisputeError("Booking not found", 404);
 
-    if (booking.status !== "ON_HOLD" || booking.deposit_outcome !== "ON_HOLD") {
+    // ON_HOLD = disputed return / unreviewed return; LOST_ESCALATION = item never came back
+    if (!["ON_HOLD", "LOST_ESCALATION"].includes(booking.status) || booking.deposit_outcome !== "ON_HOLD") {
       throw new DisputeError("Booking funds are not on hold");
     }
 

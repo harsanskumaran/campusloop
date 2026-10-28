@@ -108,8 +108,11 @@ export default function Wallet() {
                 <p className="text-gray-500">{entry.note}</p>
               </div>
               <div className="text-right">
-                <p className={entry.type === "DAMAGE_DEDUCTION" || entry.type === "HOLD" ? "text-red-600" : "text-green-700"}>
-                  ₹{entry.amount}
+                <p className={entry.direction === "CREDIT" ? "text-green-700" : "text-red-600"}>
+                  {entry.direction === "CREDIT" ? "+" : "-"}₹{entry.amount}
+                </p>
+                <p className={entry.direction === "CREDIT" ? "text-green-700" : "text-red-600"}>
+                  {entry.direction === "CREDIT" ? "Credit" : "Debit"}
                 </p>
                 <p className="text-gray-400">{new Date(entry.created_at).toLocaleDateString()}</p>
               </div>

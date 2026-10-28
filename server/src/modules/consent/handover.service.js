@@ -1,7 +1,6 @@
 // src/modules/bookings/handover.service.js
 import { pool, withTransaction } from "../../config/db.js";
-import { savePhoto } from "../../utils/savePhoto.js";
-import { hasConsent, minPhotosRequired } from "../consent/consent.service.js";
+import { hasConsent } from "../consent/consent.service.js";
 import { creditCash, deductHeldCash, releaseCash } from "../wallet/wallet.service.js";
 
 export class HandoverError extends Error {
@@ -11,10 +10,12 @@ export class HandoverError extends Error {
   }
 }
 
-// Borrower accepts current condition at pickup, uploads photos.
-// Requires: booking is CONFIRMED, BOOKING consent already signed, at least
-// the minimum number of photos attached.
-export async function submitPickup(borrowerId, bookingId, files) {
+// Borrower confirms the item's condition at pickup with a written comment.
+// Requires: booking is CONFIRMED, BOOKING consent already signed, comment present.
+export async function submitPickup(borrowerId, bookingId, comment) {
+  const text = (comment ?? "").trim();
+  if (text.length < 3) throw new HandoverError("Please add a comment about the item's condition at pickup");
+
   return withTransaction(async (client) => {
     const bookingResult = await client.query(
       "SELECT * FROM booking WHERE id = $1 FOR UPDATE",
@@ -32,25 +33,10 @@ export async function submitPickup(borrowerId, bookingId, files) {
       throw new HandoverError("Booking consent must be signed before pickup");
     }
 
-    const minPhotos = minPhotosRequired("PICKUP");
-    if (!files || files.length < minPhotos) {
-      throw new HandoverError(`At least ${minPhotos} pickup photos are required`);
-    }
-
-    // Save photos
-    for (const file of files) {
-      const { relativePath, sha256, sizeBytes } = await savePhoto(file.buffer, `evidence/${bookingId}/pickup`);
-      await client.query(
-        `INSERT INTO photo (kind, path, sha256, size_bytes, uploaded_by, booking_id)
-         VALUES ('PICKUP', $1, $2, $3, $4, $5)`,
-        [relativePath, sha256, sizeBytes, borrowerId, bookingId]
-      );
-    }
-
-    // Record the pickup consent (condition accepted)
+    // The borrower's comment IS the pickup consent
     await client.query(
-      `INSERT INTO consent (booking_id, stage, note) VALUES ($1, 'PICKUP', 'Condition accepted at pickup')`,
-      [bookingId]
+      `INSERT INTO consent (booking_id, stage, note) VALUES ($1, 'PICKUP', $2)`,
+      [bookingId, text]
     );
 
     await client.query("UPDATE booking SET status = 'PICKED_UP' WHERE id = $1", [bookingId]);
@@ -60,9 +46,12 @@ export async function submitPickup(borrowerId, bookingId, files) {
   });
 }
 
-// Borrower uploads drop photos at the drop point.
-// Requires: booking is PICKED_UP or OVERDUE, at least the minimum photos.
-export async function submitDrop(borrowerId, bookingId, files) {
+// Borrower marks the item as returned (optional note, e.g. where it was left).
+// Starts the lender's 24-hour review window.
+// Requires: booking is PICKED_UP or OVERDUE.
+export async function submitDrop(borrowerId, bookingId, note) {
+  const text = (note ?? "").trim();
+
   return withTransaction(async (client) => {
     const bookingResult = await client.query(
       "SELECT * FROM booking WHERE id = $1 FOR UPDATE",
@@ -75,34 +64,28 @@ export async function submitDrop(borrowerId, bookingId, files) {
       throw new HandoverError(`Booking must be picked up before it can be dropped off (currently ${booking.status})`);
     }
 
-    const minPhotos = minPhotosRequired("DROP");
-    if (!files || files.length < minPhotos) {
-      throw new HandoverError(`At least ${minPhotos} drop photos are required`);
-    }
-
-    for (const file of files) {
-      const { relativePath, sha256, sizeBytes } = await savePhoto(file.buffer, `evidence/${bookingId}/drop`);
-      await client.query(
-        `INSERT INTO photo (kind, path, sha256, size_bytes, uploaded_by, booking_id)
-         VALUES ('DROP', $1, $2, $3, $4, $5)`,
-        [relativePath, sha256, sizeBytes, borrowerId, bookingId]
-      );
-    }
+    await client.query(
+      `INSERT INTO consent (booking_id, stage, note) VALUES ($1, 'DROP', $2)`,
+      [bookingId, text || "Item returned, awaiting lender review"]
+    );
 
     await client.query(
-      `INSERT INTO consent (booking_id, stage, note) VALUES ($1, 'DROP', 'Item dropped off, awaiting lender review')`,
+      "UPDATE booking SET status = 'DROP_SUBMITTED', drop_submitted_at = now() WHERE id = $1",
       [bookingId]
     );
 
-    await client.query("UPDATE booking SET status = 'DROP_SUBMITTED' WHERE id = $1", [bookingId]);
-
-    return { bookingId, status: "DROP_SUBMITTED" };
+    return { bookingId, status: "DROP_SUBMITTED", reviewDeadlineHours: 24 };
   });
 }
 
 // Lender reviews the drop evidence and decides: accept (no defects) or defect.
 // This is the ONLY place money settles for a normal (non-disputed) booking.
 export async function reviewDrop(lenderId, bookingId, hasDefect, note) {
+  const comment = (note ?? "").trim();
+  if (comment.length < 3) {
+    throw new HandoverError("A comment is required to accept the return or report a defect");
+  }
+
   return withTransaction(async (client) => {
     const bookingResult = await client.query(
       "SELECT * FROM booking WHERE id = $1 FOR UPDATE",
@@ -115,47 +98,97 @@ export async function reviewDrop(lenderId, bookingId, hasDefect, note) {
       throw new HandoverError(`Booking must be DROP_SUBMITTED to review (currently ${booking.status})`);
     }
 
-    // Rent always goes to the lender, defect or not. It must LEAVE the borrower's
-    // escrow at the same moment, otherwise the money is counted twice.
+    const pickupResult = await client.query(
+      `SELECT signed_at FROM consent
+       WHERE booking_id = $1 AND stage = 'PICKUP'
+       ORDER BY signed_at ASC
+       LIMIT 1`,
+      [bookingId]
+    );
+    if (!pickupResult.rows[0] || !booking.drop_submitted_at) {
+      throw new HandoverError("Pickup or return timestamp is missing; cannot settle this booking");
+    }
+
+    const pickupTime = new Date(pickupResult.rows[0].signed_at).getTime();
+    const returnedAt = new Date(booking.drop_submitted_at).getTime();
+    if (!Number.isFinite(pickupTime) || !Number.isFinite(returnedAt) || returnedAt < pickupTime) {
+      throw new HandoverError("Pickup or return timestamp is invalid; cannot settle this booking");
+    }
+
+    const itemResult = await client.query(
+      "SELECT tier, rent_per_day FROM item WHERE id = $1",
+      [booking.item_id]
+    );
+    const item = itemResult.rows[0];
+    if (!item) throw new HandoverError("Item not found", 404);
+    if (!Number.isInteger(item.rent_per_day) || item.rent_per_day <= 0) {
+      throw new HandoverError("Item rent is invalid; cannot settle this booking");
+    }
+
+    const earlyReturn = returnedAt < new Date(booking.end_date).getTime();
+    const usedDays = Math.max(1, Math.ceil((returnedAt - pickupTime) / 86400000));
+    const rentCharged = earlyReturn
+      ? Math.min(booking.rent_coins, item.rent_per_day * usedDays)
+      : booking.rent_coins;
+    const unusedRent = booking.rent_coins - rentCharged;
+    const rentNote = earlyReturn
+      ? `Rent paid for ${usedDays} day${usedDays === 1 ? "" : "s"}`
+      : "Rent paid for booked rental period";
+
+    // Settle only rent actually used on an early return; otherwise the full
+    // agreed rent remains due. Every escrow movement is recorded separately.
     await deductHeldCash(
-      booking.borrower_id, booking.rent_coins, bookingId,
-      "Rent paid to lender", client, "RENT_PAYMENT"
+      booking.borrower_id, rentCharged, bookingId,
+      rentNote, client, "RENT_PAYMENT"
     );
     await creditCash(
-      lenderId, booking.rent_coins, "RENT_PAYMENT", bookingId,
+      lenderId, rentCharged, "RENT_PAYMENT", bookingId,
       "Rent released on drop review", client
     );
+
+    if (unusedRent > 0) {
+      await releaseCash(
+        booking.borrower_id, unusedRent, bookingId, client,
+        "Unused rent returned after early item return"
+      );
+    }
 
     let depositOutcome;
     if (hasDefect) {
       // Deposit is forfeited: remove it from the borrower's held_cash and
       // credit it to the lender instead of returning it.
-      await deductHeldCash(
-        booking.borrower_id, booking.deposit_coins, bookingId,
-        note ?? "Deposit forfeited: defect reported", client
-      );
-      await creditCash(
-        lenderId, booking.deposit_coins, "DAMAGE_DEDUCTION", bookingId,
-        "Deposit credited to lender: defect reported", client
-      );
+      if (booking.deposit_coins > 0) {
+        await deductHeldCash(
+          booking.borrower_id, booking.deposit_coins, bookingId,
+          `Deposit forfeited: ${comment}`, client
+        );
+        await creditCash(
+          lenderId, booking.deposit_coins, "DAMAGE_DEDUCTION", bookingId,
+          "Deposit credited to lender: defect reported", client
+        );
+      }
       depositOutcome = "FORFEITED";
     } else {
       // No defects: deposit is released back to the borrower's spendable balance.
-      await releaseCash(booking.borrower_id, booking.deposit_coins, bookingId, client);
+      if (booking.deposit_coins > 0) {
+        await releaseCash(
+          booking.borrower_id, booking.deposit_coins, bookingId, client,
+          "Booking deposit returned after lender review"
+        );
+      }
       depositOutcome = "REFUNDED";
     }
 
     await client.query(
-      "UPDATE booking SET status = 'COMPLETED', deposit_outcome = $1 WHERE id = $2",
-      [depositOutcome, bookingId]
+      `UPDATE booking SET status = 'COMPLETED', deposit_outcome = $1,
+                          review_note = $3, reviewed_at = now()
+       WHERE id = $2`,
+      [depositOutcome, bookingId, comment]
     );
 
     // High-value items go into a mandatory cooling/inspection period instead
     // of relisting immediately. Standard items relist right away.
-    const itemResult = await client.query("SELECT tier FROM item WHERE id = $1", [booking.item_id]);
-    const tier = itemResult.rows[0].tier;
-
-    if (tier === "HIGH_VALUE") {
+    if (item.tier === "HIGH_VALUE") {
       const coolingDays = 3;
       await client.query(
         `UPDATE item SET status = 'COOLING', cooling_until = now() + ($1 || ' days')::interval WHERE id = $2`,
@@ -165,10 +198,10 @@ export async function reviewDrop(lenderId, bookingId, hasDefect, note) {
       await client.query("UPDATE item SET status = 'LISTED' WHERE id = $1", [booking.item_id]);
     }
 
-    if (hasDefect && note) {
+    if (hasDefect) {
       await client.query(
         `INSERT INTO inspection (item_id, booking_id, passed, notes) VALUES ($1, $2, FALSE, $3)`,
-        [booking.item_id, bookingId, note]
+        [booking.item_id, bookingId, comment]
       );
     }
 

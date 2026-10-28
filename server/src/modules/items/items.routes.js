@@ -4,31 +4,37 @@ import { z } from "zod";
 import { pool } from "../../config/db.js";
 import { requireAuth } from "../../middleware/auth.js";
 import { quotaGuard } from "../../middleware/quotaGuard.js";
-import { upload } from "../../middleware/upload.js";
+import { photoUpload } from "../../middleware/upload.js";
 import { savePhoto } from "../../utils/savePhoto.js";
 import {
   createItem, getItem, listItems, getAvailability, listMyItems, ItemError,
 } from "./items.service.js";
+import { ITEM_CATEGORIES } from "./categories.js";
 
 const router = Router();
 
+// The create form is multipart (text fields + 4-8 photos), so numbers arrive as strings.
 const createItemSchema = z.object({
-  title: z.string().min(2),
-  description: z.string().min(5),
-  category: z.string().min(2),
-  declaredValue: z.number().int().positive(),
-  rentPerDay: z.number().int().positive(),
-  deposit: z.number().int().min(0),
-  knownDefects: z.string().optional(),
+  title: z.string().trim().min(2, "Title must be at least 2 characters"),
+  description: z.string().trim().min(5, "Description must be at least 5 characters"),
+  category: z.enum(ITEM_CATEGORIES, { error: `Choose a category: ${ITEM_CATEGORIES.join(", ")}` }),
+  declaredValue: z.coerce.number({ error: "Choose an item value range" }).int().positive("Choose an item value range"),
+  rentPerDay: z.coerce.number({ error: "Enter the rent per day" }).int().positive("Rent per day must be at least ₹1"),
+  deposit: z.coerce.number({ error: "Enter the deposit" }).int().min(0, "Deposit cannot be negative"),
+  knownDefects: z.string().trim().optional().transform((v) => v || undefined),
 });
 
-// POST /items — create a listing (counts toward the semester quota)
-router.post("/", requireAuth, quotaGuard, async (req, res) => {
+// POST /items — create a listing with 4-8 photos (counts toward the semester quota).
+// multipart/form-data: title, description, category, declaredValue, rentPerDay,
+// deposit, knownDefects?, photos (min 4)
+router.post("/", requireAuth, quotaGuard, photoUpload("photos", 8), async (req, res) => {
   const parsed = createItemSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.issues.map((i) => i.message).join(". ") });
+  }
 
   try {
-    const result = await createItem(req.user.id, parsed.data);
+    const result = await createItem(req.user.id, parsed.data, req.files ?? []);
     res.status(201).json(result);
   } catch (err) {
     if (err instanceof ItemError) return res.status(err.status).json({ error: err.message });
@@ -65,7 +71,7 @@ router.get("/mine", requireAuth, async (req, res) => {
 // GET /items/:id — single item with photos
 router.get("/:id", requireAuth, async (req, res) => {
   try {
-    const item = await getItem(req.params.id);
+    const item = await getItem(req.params.id, req.user);
     res.json({ item });
   } catch (err) {
     if (err instanceof ItemError) return res.status(err.status).json({ error: err.message });
@@ -87,7 +93,7 @@ router.get("/:id/availability", requireAuth, async (req, res) => {
 });
 
 // POST /items/:id/photos — owner only, up to 8 images
-router.post("/:id/photos", requireAuth, upload.array("photos", 8), async (req, res) => {
+router.post("/:id/photos", requireAuth, photoUpload("photos", 8), async (req, res) => {
   const itemId = req.params.id;
   try {
     const ownerCheck = await pool.query("SELECT owner_id FROM item WHERE id = $1", [itemId]);

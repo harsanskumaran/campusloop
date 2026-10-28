@@ -81,6 +81,11 @@ function DisputesTab() {
             <div>
               <p className="font-semibold">{d.item_title}</p>
               <p className="text-sm text-gray-600">{d.reason}</p>
+              {d.raised_by_role && (
+                <p className="text-xs text-gray-500">
+                  Raised by {d.raised_by_role.toLowerCase()} · {new Date(d.created_at).toLocaleString()}
+                </p>
+              )}
               <p className="mt-2 text-sm">
                 <span className="font-medium">Borrower:</span> {d.borrower_name} · {d.borrower_phone} · Room {d.borrower_room_no}
               </p>
@@ -151,15 +156,32 @@ function DisputesTab() {
 }
 
 function UsersTab() {
+  const [users, setUsers] = useState([]);
   const [exceeded, setExceeded] = useState([]);
   const [suspended, setSuspended] = useState([]);
   const [busyId, setBusyId] = useState(null);
 
   function load() {
+    api.get("/admin/users").then((d) => setUsers(d.users));
     api.get("/admin/users/exceeded").then((d) => setExceeded(d.users));
     api.get("/admin/users/suspended").then((d) => setSuspended(d.users));
   }
   useEffect(load, []);
+
+  async function suspend(userId) {
+    const reason = window.prompt("Enter a reason to block this user's account:");
+    if (!reason?.trim()) return;
+
+    setBusyId(userId);
+    try {
+      await api.post("/admin/users/suspend", { userId, reason: reason.trim() });
+      load();
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   async function lift(userId) {
     setBusyId(userId);
@@ -187,6 +209,32 @@ function UsersTab() {
 
   return (
     <div className="space-y-6">
+      <div>
+        <h3 className="font-semibold mb-2">All users ({users.length})</h3>
+        {users.map((u) => (
+          <div key={u.id} className="bg-white border rounded-lg p-3 flex justify-between items-center gap-3 mb-2">
+            <div className="text-sm">
+              <p className="font-medium">{u.name} ({u.email})</p>
+              <p className="text-gray-500">
+                ID {u.id} · {u.phone || "No phone"} · Room {u.room_no || "Not provided"} · Status: {u.status}
+              </p>
+            </div>
+            {u.status === "SUSPENDED" ? (
+              <button disabled={busyId === u.id} onClick={() => unsuspend(u.id)}
+                className="bg-blue-600 text-white text-sm px-3 py-1 rounded disabled:opacity-50">
+                Unblock account
+              </button>
+            ) : (
+              <button disabled={busyId === u.id} onClick={() => suspend(u.id)}
+                className="bg-red-600 text-white text-sm px-3 py-1 rounded disabled:opacity-50">
+                Block account
+              </button>
+            )}
+          </div>
+        ))}
+        {users.length === 0 && <p className="text-gray-500 text-sm">No users found.</p>}
+      </div>
+
       <div>
         <h3 className="font-semibold mb-2">Exceeded users ({exceeded.length})</h3>
         {exceeded.map((u) => (

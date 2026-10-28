@@ -89,6 +89,9 @@ router.post("/login", async (req, res) => {
     if (!valid) {
       return res.status(401).json({ error: "Invalid email or password" });
     }
+    if (user.status === "SUSPENDED") {
+      return res.status(403).json({ error: "Your account is blocked. Contact an administrator." });
+    }
 
     const token = signToken(user);
     delete user.password_hash;

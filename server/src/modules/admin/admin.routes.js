@@ -3,7 +3,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { requireAuth, requireAdmin } from "../../middleware/auth.js";
 import {
-  getReports, listExceededUsers, listSuspendedUsers, listAllDisputes,
+  getReports, listExceededUsers, listSuspendedUsers, listUsers, listAllDisputes,
   suspendUser, unsuspendUser,
 } from "./admin.service.js";
 
@@ -41,6 +41,17 @@ router.get("/users/suspended", async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to fetch suspended users" });
+  }
+});
+
+// GET /admin/users
+router.get("/users", async (req, res) => {
+  try {
+    const users = await listUsers();
+    res.json({ users });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch users" });
   }
 });
 

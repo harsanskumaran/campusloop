@@ -2,14 +2,20 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client.js";
+import PhotoPicker from "../components/PhotoPicker.jsx";
+import { ITEM_CATEGORIES } from "../constants/categories.js";
+
+const MIN_PHOTOS = 4;
+const MAX_PHOTOS = 8;
+
+const VALUE_BANDS = {
+  low: { label: "Low (under ₹2,000)", amount: 1000 },
+  medium: { label: "Medium (₹2,000 – ₹5,000)", amount: 3500 },
+  high: { label: "High (above ₹5,000)", amount: 7500 },
+};
 
 export default function PostItem() {
   const navigate = useNavigate();
-  const VALUE_BANDS = {
-    low: { label: "Low (under ₹2,000)", amount: 1000 },
-    medium: { label: "Medium (₹2,000 – ₹5,000)", amount: 3500 },
-    high: { label: "High (above ₹5,000)", amount: 7500 },
-  };
 
   const [form, setForm] = useState({
     title: "", description: "", category: "", valueBand: "", rentPerDay: "", deposit: "", knownDefects: "",
@@ -22,32 +28,37 @@ export default function PostItem() {
     setForm((f) => ({ ...f, [field]: value }));
   }
 
+  const enoughPhotos = photos.length >= MIN_PHOTOS;
+
   async function handleSubmit(e) {
     e.preventDefault();
     setError("");
+    if (!enoughPhotos) {
+      setError(`Please add at least ${MIN_PHOTOS} photos of the item (you added ${photos.length}).`);
+      return;
+    }
     setBusy(true);
     try {
-      const data = await api.post("/items", {
-        title: form.title,
-        description: form.description,
-        category: form.category,
-        declaredValue: VALUE_BANDS[form.valueBand].amount,
-        rentPerDay: Number(form.rentPerDay),
-        deposit: Number(form.deposit),
-        knownDefects: form.knownDefects || undefined,
+      // One request: the item and its photos are saved together (all or nothing)
+      const fd = new FormData();
+      fd.append("title", form.title.trim());
+      fd.append("description", form.description.trim());
+      fd.append("category", form.category);
+      fd.append("declaredValue", String(VALUE_BANDS[form.valueBand].amount));
+      fd.append("rentPerDay", form.rentPerDay);
+      fd.append("deposit", form.deposit);
+      if (form.knownDefects.trim()) fd.append("knownDefects", form.knownDefects.trim());
+      photos.forEach((f) => fd.append("photos", f));
+
+      const data = await api.postForm("/items", fd);
+
+      navigate("/post-item/success", {
+        replace: true,
+        state: { itemId: data.item.id, title: data.item.title },
       });
-
-      const itemId = data.item.id;
-
-      if (photos.length > 0) {
-        const fd = new FormData();
-        photos.forEach((f) => fd.append("photos", f));
-        await api.postForm(`/items/${itemId}/photos`, fd);
-      }
-
-      navigate(`/items/${itemId}`);
     } catch (err) {
       setError(err.message);
+      window.scrollTo({ top: 0, behavior: "smooth" });
     } finally {
       setBusy(false);
     }
@@ -64,28 +75,32 @@ export default function PostItem() {
         {error && <p className="bg-red-50 text-red-600 text-sm p-2 rounded">{error}</p>}
 
         <div>
-          <label className="block text-sm font-medium mb-1">Title</label>
-          <input required value={form.title} onChange={(e) => update("title", e.target.value)}
+          <label htmlFor="title" className="block text-sm font-medium mb-1">Title</label>
+          <input id="title" required value={form.title} onChange={(e) => update("title", e.target.value)}
             className="w-full border rounded px-3 py-2" />
         </div>
 
         <div>
-          <label className="block text-sm font-medium mb-1">Description</label>
-          <textarea required value={form.description} onChange={(e) => update("description", e.target.value)}
+          <label htmlFor="description" className="block text-sm font-medium mb-1">Description</label>
+          <textarea id="description" required value={form.description} onChange={(e) => update("description", e.target.value)}
             className="w-full border rounded px-3 py-2" rows={3} />
         </div>
 
         <div>
-          <label className="block text-sm font-medium mb-1">Category</label>
-          <input required value={form.category} onChange={(e) => update("category", e.target.value)}
-            placeholder="e.g. electronics, books, sports"
-            className="w-full border rounded px-3 py-2" />
+          <label htmlFor="category" className="block text-sm font-medium mb-1">Category</label>
+          <select id="category" required value={form.category} onChange={(e) => update("category", e.target.value)}
+            className="w-full border rounded px-3 py-2 bg-white">
+            <option value="" disabled>Select a category</option>
+            {ITEM_CATEGORIES.map((c) => (
+              <option key={c.value} value={c.value}>{c.label}</option>
+            ))}
+          </select>
         </div>
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-sm font-medium mb-1">Item value</label>
-            <select required value={form.valueBand} onChange={(e) => update("valueBand", e.target.value)}
+            <label htmlFor="valueBand" className="block text-sm font-medium mb-1">Item value</label>
+            <select id="valueBand" required value={form.valueBand} onChange={(e) => update("valueBand", e.target.value)}
               className="w-full border rounded px-3 py-2 bg-white">
               <option value="" disabled>Select a range</option>
               {Object.entries(VALUE_BANDS).map(([key, band]) => (
@@ -94,17 +109,17 @@ export default function PostItem() {
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1">Deposit (₹, max 5,000)</label>
-            <input type="number" required min="0" max="5000" value={form.deposit}
+            <label htmlFor="deposit" className="block text-sm font-medium mb-1">Deposit (₹, max 5,000)</label>
+            <input id="deposit" type="number" required min="0" max="5000" value={form.deposit}
               onChange={(e) => update("deposit", e.target.value)}
               className="w-full border rounded px-3 py-2" />
           </div>
         </div>
 
         <div>
-          <label className="block text-sm font-medium mb-1">Cost for 1 day (₹)</label>
+          <label htmlFor="rentPerDay" className="block text-sm font-medium mb-1">Cost for 1 day (₹)</label>
           <input
-            type="number" required min="1" step="1" value={form.rentPerDay}
+            id="rentPerDay" type="number" required min="1" step="1" value={form.rentPerDay}
             onChange={(e) => update("rentPerDay", e.target.value)}
             placeholder="e.g. 50" className="w-full border rounded px-3 py-2"
           />
@@ -120,19 +135,21 @@ export default function PostItem() {
         )}
 
         <div>
-          <label className="block text-sm font-medium mb-1">Known defects (optional)</label>
-          <input value={form.knownDefects} onChange={(e) => update("knownDefects", e.target.value)}
+          <label htmlFor="knownDefects" className="block text-sm font-medium mb-1">Known defects (optional)</label>
+          <input id="knownDefects" value={form.knownDefects} onChange={(e) => update("knownDefects", e.target.value)}
             placeholder="Be upfront — this protects you if a dispute comes up later"
             className="w-full border rounded px-3 py-2" />
         </div>
 
         <div>
-          <label className="block text-sm font-medium mb-1">Photos</label>
-          <input type="file" accept="image/*" multiple onChange={(e) => setPhotos(Array.from(e.target.files))}
-            className="w-full border rounded px-3 py-2 text-sm" />
+          <label className="block text-sm font-medium mb-1">
+            Photos <span className="text-red-600">*</span>
+            <span className="text-gray-500 font-normal"> (at least {MIN_PHOTOS}, up to {MAX_PHOTOS})</span>
+          </label>
+          <PhotoPicker files={photos} onChange={setPhotos} minCount={MIN_PHOTOS} maxCount={MAX_PHOTOS} />
         </div>
 
-        <button type="submit" disabled={busy}
+        <button type="submit" disabled={busy || !enoughPhotos}
           className="w-full bg-blue-600 text-white rounded py-2 font-medium disabled:opacity-50">
           {busy ? "Posting..." : "Post item"}
         </button>

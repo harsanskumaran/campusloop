@@ -52,9 +52,17 @@ router.post("/withdraw", requireAuth, async (req, res) => {
 router.get("/ledger", requireAuth, async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT cl.id, cl.type, cl.amount, cl.booking_id, cl.note, cl.created_at
+      `SELECT cl.id, cl.type, cl.amount, cl.booking_id, cl.note, cl.created_at,
+              CASE
+                WHEN cl.type IN ('TOPUP', 'RELEASE', 'DEPOSIT_REFUND', 'REFUND') THEN 'CREDIT'
+                WHEN cl.type IN ('HOLD', 'WITHDRAW', 'PURCHASE') THEN 'DEBIT'
+                WHEN cl.type IN ('RENT_PAYMENT', 'DAMAGE_DEDUCTION') THEN
+                  CASE WHEN b.lender_id = w.user_id THEN 'CREDIT' ELSE 'DEBIT' END
+                ELSE CASE WHEN cl.amount < 0 THEN 'DEBIT' ELSE 'CREDIT' END
+              END AS direction
        FROM cash_ledger cl
        JOIN wallet w ON w.id = cl.wallet_id
+       LEFT JOIN booking b ON b.id = cl.booking_id
        WHERE w.user_id = $1
        ORDER BY cl.created_at DESC`,
       [req.user.id]

@@ -2,6 +2,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client.js";
+import AuthImage from "../components/AuthImage.jsx";
+import { ITEM_CATEGORIES, categoryLabel } from "../constants/categories.js";
 
 export default function Items() {
   const [items, setItems] = useState([]);
@@ -46,27 +48,37 @@ export default function Items() {
           className="border rounded px-3 py-2"
         >
           <option value="">All categories</option>
-          <option value="electronics">Electronics</option>
-          <option value="books">Books</option>
-          <option value="sports">Sports</option>
-          <option value="furniture">Furniture</option>
-          <option value="appliances">Appliances</option>
-          <option value="other">Other</option>
+          {ITEM_CATEGORIES.map((c) => (
+            <option key={c.value} value={c.value}>{c.label}</option>
+          ))}
         </select>
       </div>
 
       {error && <p className="text-red-600">{error}</p>}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
         {items.map((item) => (
-          <Link key={item.id} to={`/items/${item.id}`} className="bg-white rounded-lg border p-4 hover:shadow-md transition">
-            <h2 className="font-semibold">{item.title}</h2>
-            <p className="text-sm text-gray-500">{item.category}</p>
-            <p className="mt-2">₹{item.rent_per_day}/day · Deposit ₹{item.deposit}</p>
-            {item.tier === "HIGH_VALUE" && (
-              <span className="inline-block mt-2 text-xs bg-amber-100 text-amber-800 px-2 py-1 rounded">
-                High value
-              </span>
-            )}
+          <Link key={item.id} to={`/items/${item.id}`} className="bg-white rounded-lg border overflow-hidden hover:shadow-md transition">
+            <div className="relative">
+              <AuthImage
+                photoId={item.cover_photo_id} alt={item.title}
+                className="w-full h-44 object-cover"
+              />
+              {item.photo_count > 1 && (
+                <span className="absolute bottom-2 right-2 bg-black/60 text-white text-xs px-2 py-0.5 rounded">
+                  {item.photo_count} photos
+                </span>
+              )}
+            </div>
+            <div className="p-4">
+              <h2 className="font-semibold">{item.title}</h2>
+              <p className="text-sm text-gray-500">{categoryLabel(item.category)}</p>
+              <p className="mt-2">₹{item.rent_per_day}/day · Deposit ₹{item.deposit}</p>
+              {item.tier === "HIGH_VALUE" && (
+                <span className="inline-block mt-2 text-xs bg-amber-100 text-amber-800 px-2 py-1 rounded">
+                  High value
+                </span>
+              )}
+            </div>
           </Link>
         ))}
       </div>

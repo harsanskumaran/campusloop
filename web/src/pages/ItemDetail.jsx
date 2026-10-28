@@ -2,6 +2,8 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { api } from "../api/client.js";
+import AuthImage from "../components/AuthImage.jsx";
+import { categoryLabel } from "../constants/categories.js";
 
 export default function ItemDetail() {
   const { id } = useParams();
@@ -13,24 +15,9 @@ export default function ItemDetail() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [loading, setLoading] = useState(false);
-  const [extensionSent, setExtensionSent] = useState(false);
-  const [extensionBusy, setExtensionBusy] = useState(false);
   const [consentChecked, setConsentChecked] = useState(false);
   const [balance, setBalance] = useState(null); // borrower's spendable wallet cash
-
-  const hitMonthlyLimit = error.includes("monthly rental limit");
-
-  async function handleRequestExtension() {
-    setExtensionBusy(true);
-    try {
-      await api.post("/bookings/extensions", { itemId: Number(id), note: "Requesting one more rental slot this month" });
-      setExtensionSent(true);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setExtensionBusy(false);
-    }
-  }
+  const [activePhoto, setActivePhoto] = useState(0);
 
   useEffect(() => {
     api.get(`/items/${id}`).then((d) => setItem(d.item)).catch((e) => setError(e.message));
@@ -73,6 +60,26 @@ export default function ItemDetail() {
       <button onClick={() => navigate(-1)} className="text-sm text-blue-600 mb-4">&larr; Back</button>
 
       <div className="bg-white rounded-lg border p-6 mb-6">
+        {item.photos?.length > 0 && (
+          <div className="mb-5">
+            <AuthImage
+              photoId={item.photos[Math.min(activePhoto, item.photos.length - 1)].id}
+              alt={item.title} className="w-full h-72 object-cover rounded"
+            />
+            {item.photos.length > 1 && (
+              <div className="flex gap-2 mt-2 overflow-x-auto">
+                {item.photos.map((p, i) => (
+                  <button
+                    key={p.id} type="button" onClick={() => setActivePhoto(i)}
+                    className={`shrink-0 rounded border-2 ${i === activePhoto ? "border-blue-600" : "border-transparent"}`}
+                  >
+                    <AuthImage photoId={p.id} alt={`${item.title} photo ${i + 1}`} className="w-16 h-16 object-cover rounded" />
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         <div className="flex items-start justify-between">
           <h1 className="text-2xl font-bold">{item.title}</h1>
           {item.tier === "HIGH_VALUE" && (
@@ -80,14 +87,29 @@ export default function ItemDetail() {
           )}
         </div>
         <p className="text-gray-600 mt-2">{item.description}</p>
-        <p className="text-sm text-gray-500 mt-1">Category: {item.category} · Owner: {item.owner_name}</p>
+        <p className="text-sm text-gray-500 mt-1">Category: {categoryLabel(item.category)} · Owner: {item.owner_name}</p>
         <p className="mt-4 font-medium">₹{item.rent_per_day} per day (fixed rate) · Deposit ₹{item.deposit}</p>
         {item.known_defects && (
           <p className="mt-2 text-sm text-amber-700 bg-amber-50 p-2 rounded">
             Known defects: {item.known_defects}
           </p>
         )}
-        {item.status !== "LISTED" && (
+        {item.hold && (
+          <div className="mt-3 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+            <p className="font-semibold">On hold — under admin review</p>
+            {item.hold.reason ? (
+              <>
+                <p className="mt-1">Reason: {item.hold.reason}</p>
+                <p className="text-xs text-amber-700 mt-1">
+                  Raised by {item.hold.raised_by.toLowerCase()} · {new Date(item.hold.held_since).toLocaleString()}
+                </p>
+              </>
+            ) : (
+              <p className="mt-1">This item is temporarily unavailable while a recent return is being reviewed.</p>
+            )}
+          </div>
+        )}
+        {item.status !== "LISTED" && !item.hold && (
           <p className="mt-3 text-sm text-red-600">
             Not currently available ({item.status}
             {item.cooling_until ? ` until ${new Date(item.cooling_until).toLocaleDateString()}` : ""})
@@ -113,15 +135,6 @@ export default function ItemDetail() {
         {error && (
           <div className="bg-red-50 text-red-600 text-sm p-2 rounded mb-3">
             <p>{error}</p>
-            {hitMonthlyLimit && !extensionSent && (
-              <button type="button" disabled={extensionBusy} onClick={handleRequestExtension}
-                className="mt-2 text-amber-700 underline disabled:opacity-50">
-                Ask the lender for one more slot this month
-              </button>
-            )}
-            {extensionSent && (
-              <p className="mt-2 text-green-700">Extension request sent — check back once the lender responds.</p>
-            )}
           </div>
         )}
         {success && <p className="bg-green-50 text-green-700 text-sm p-2 rounded mb-3">{success}</p>}
@@ -167,7 +180,7 @@ export default function ItemDetail() {
           <ul className="text-sm text-gray-600 list-disc pl-5 space-y-1 mb-3">
             <li>The item is in the condition described above{item.known_defects ? `, including the known defects: “${item.known_defects}”` : " (no known defects declared)"}.</li>
             <li>₹{item.deposit} deposit plus rent is held from my wallet once the lender accepts.</li>
-            <li>I will upload at least 4 photos at pickup and at drop-off.</li>
+            <li>I will describe the item's condition in a comment at pickup and tell the lender when I return it.</li>
             <li>If the lender reports a defect on return, my deposit may be forfeited.</li>
           </ul>
           <label className="flex items-start gap-2 text-sm">

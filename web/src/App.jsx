@@ -8,6 +8,7 @@ import ItemDetail from "./pages/ItemDetail.jsx";
 import MyBookings from "./pages/MyBookings.jsx";
 import Wallet from "./pages/Wallet.jsx";
 import PostItem from "./pages/PostItem.jsx";
+import PostSuccess from "./pages/PostSuccess.jsx";
 import MyItems from "./pages/MyItems.jsx";
 import Admin from "./pages/Admin.jsx";
 
@@ -59,6 +60,7 @@ export default function App() {
           <Route path="/bookings" element={<ProtectedRoute><MyBookings /></ProtectedRoute>} />
           <Route path="/wallet" element={<ProtectedRoute><Wallet /></ProtectedRoute>} />
           <Route path="/post-item" element={<ProtectedRoute><PostItem /></ProtectedRoute>} />
+          <Route path="/post-item/success" element={<ProtectedRoute><PostSuccess /></ProtectedRoute>} />
           <Route path="/my-items" element={<ProtectedRoute><MyItems /></ProtectedRoute>} />
           <Route path="/admin" element={<AdminRoute><Admin /></AdminRoute>} />
           <Route path="*" element={<Navigate to="/items" replace />} />
